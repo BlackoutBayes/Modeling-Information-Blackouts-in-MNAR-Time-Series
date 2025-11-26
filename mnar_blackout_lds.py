@@ -370,6 +370,7 @@ class MNARBlackoutLDS:
         phi_steps: int = 5,
         phi_lr: float = 1e-3,
         verbose: bool = True,
+        convergence_tol: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Run EM (approximate) for the MNAR LDS on a single sequence.
@@ -408,6 +409,10 @@ class MNARBlackoutLDS:
             Learning rate for phi updates.
         verbose : bool
             If True, print progress each iteration.
+        convergence_tol : Optional[float]
+            If not None, perform early stopping when the maximum
+            relative change in {A, C, phi} between successive
+            iterations drops below this threshold.
 
         Returns
         -------
@@ -577,6 +582,23 @@ class MNARBlackoutLDS:
                     phi_new[d] = phi_d
 
             # ------------------------------------------------
+            # Compute relative parameter change (for early stop)
+            # ------------------------------------------------
+            max_rel_change = None
+            if convergence_tol is not None and it > 0:
+                # Helper to compute relative Frobenius change
+                def _rel_change(new: np.ndarray, old: np.ndarray) -> float:
+                    num = np.linalg.norm(new - old)
+                    denom = np.linalg.norm(old) + 1e-8
+                    return num / denom
+
+                prev_params = self.params
+                delta_A = _rel_change(A_new, prev_params.A)
+                delta_C = _rel_change(C_new, prev_params.C)
+                delta_phi = _rel_change(phi_new, prev_params.phi)
+                max_rel_change = max(delta_A, delta_C, delta_phi)
+
+            # ------------------------------------------------
             # Update the parameter container
             # ------------------------------------------------
             self.params = MNARParams(
@@ -601,5 +623,102 @@ class MNARBlackoutLDS:
                 print(f"  A norm: {np.linalg.norm(A_new):.3f}")
                 print(f"  Q trace: {np.trace(Q_new):.3f}")
                 print(f"  mean diag(R): {mean_R:.3f}")
+                if max_rel_change is not None:
+                    print(f"  max relative param change: {max_rel_change:.3e}")
+
+            # ------------------------------------------------
+            # Early stopping condition
+            # ------------------------------------------------
+            if (
+                convergence_tol is not None
+                and max_rel_change is not None
+                and max_rel_change < convergence_tol
+            ):
+                if verbose:
+                    print(
+                        f"  Early stopping at iter {it + 1} "
+                        f"(Δ={max_rel_change:.3e} < tol={convergence_tol:.1e})"
+                    )
+                break
 
         return history
+
+    # --------------------------------------------------------
+    # Reconstruction & forecasting utilities
+    # --------------------------------------------------------
+
+    def reconstruct_from_smoother(
+        self,
+        mu_smooth: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Reconstruct x_t from smoothed latent states.
+
+        Uses:
+            x_hat_t = C * mu_{t|T}
+
+        Parameters
+        ----------
+        mu_smooth : np.ndarray, shape (T, K)
+            Smoothed latent means from rts_smoother().
+
+        Returns
+        -------
+        x_hat : np.ndarray, shape (T, D)
+            Reconstructed speed panel.
+        """
+        C = self.params.C
+        # Matrix multiply for all T at once:
+        # (T, K) @ (K, D)^T  => (T, D)
+        return mu_smooth @ C.T
+
+    def k_step_forecast(
+        self,
+        mu_filt: np.ndarray,
+        Sigma_filt: np.ndarray,
+        start_idx: int,
+        k: int,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        k-step-ahead forecast starting from time 'start_idx'.
+
+        This corresponds to forecasting from the end of a blackout:
+        you condition on data up to time 'start_idx', then propagate
+        forward using the dynamics.
+
+        Parameters
+        ----------
+        mu_filt : np.ndarray, shape (T, K)
+            Filtered means from ekf_forward().
+        Sigma_filt : np.ndarray, shape (T, K, K)
+            Filtered covariances from ekf_forward().
+        start_idx : int
+            Index 'b' where the blackout ends. We forecast from t = b.
+        k : int
+            Horizon length (in steps), e.g. 1, 3, or 6.
+
+        Returns
+        -------
+        mean_x : np.ndarray, shape (D,)
+            Forecast mean x_{b+k}.
+        cov_x : np.ndarray, shape (D, D)
+            Forecast covariance of x_{b+k}.
+        """
+        A, Q, C, R = self.params.A, self.params.Q, self.params.C, self.params.R
+
+        # Start from filtered posterior at time b
+        mu = mu_filt[start_idx].copy()        # (K,)
+        Sigma = Sigma_filt[start_idx].copy()  # (K, K)
+
+        # Propagate state forward k steps with dynamics
+        for _ in range(k):
+            mu = A @ mu
+            Sigma = A @ Sigma @ A.T + Q
+
+        # Map to observation space:
+        #   x_{b+k} ~ N(C mu, C Σ C^T + R)
+        mean_x = C @ mu                          # (D,)
+        cov_x = C @ Sigma @ C.T + R              # (D, D)
+
+        return mean_x, cov_x
+
