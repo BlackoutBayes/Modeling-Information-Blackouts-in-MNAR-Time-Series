@@ -650,7 +650,8 @@ class MNARBlackoutLDS:
     def reconstruct_from_smoother(
         self,
         mu_smooth: np.ndarray,
-    ) -> np.ndarray:
+        Sigma_smooth: np.ndarray,
+    ) -> list[np.ndarray, np.ndarray]:
         """
         Reconstruct x_t from smoothed latent states.
 
@@ -666,11 +667,17 @@ class MNARBlackoutLDS:
         -------
         x_hat : np.ndarray, shape (T, D)
             Reconstructed speed panel.
+        cov : np.ndarray, shape (T, D, D)
+            Reconstructed covariance matrices.
         """
         C = self.params.C
         # Matrix multiply for all T at once:
         # (T, K) @ (K, D)^T  => (T, D)
-        return mu_smooth @ C.T
+        x_hat = mu_smooth @ C.T
+
+        cov = C @ Sigma_smooth @ C.T + self.params.R
+
+        return x_hat, cov
 
     def k_step_forecast(
         self,

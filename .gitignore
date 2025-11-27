@@ -1,2 +1,7 @@
 loop_20150101_20151231.csv
 env/
+__pycache__/
+*.pyc
+.DS_Store
+.ipynb_checkpoints
+.vscode/

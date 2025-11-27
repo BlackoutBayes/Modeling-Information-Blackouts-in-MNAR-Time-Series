@@ -185,13 +185,17 @@ def get_eval_windows(
     """
     data_dir = Path(data_dir)
     path = data_dir / "evaluation_windows.parquet"
+    pkl_path = data_dir / "evaluation_windows.pkl"
 
-    if not path.exists():
+    if not path.exists() and not pkl_path.exists():
         raise FileNotFoundError(
-            f"Could not find 'evaluation_windows.parquet' under {data_dir}."
+            f"Could not find 'evaluation_windows.parquet' or 'evaluation_windows.pkl' under {data_dir}."
         )
 
-    df = pd.read_parquet(path)
+    try:
+        df = pd.read_parquet(path, engine="pyarrow")
+    except Exception:
+        df = pd.read_pickle(pkl_path)
 
     if as_dataframe:
         return df
