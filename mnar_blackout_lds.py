@@ -505,12 +505,12 @@ class MNARBlackoutLDS:
             Q_new += 1e-6 * np.eye(K)
 
             # --- Regularization: shrink Q toward an isotropic prior and cap its scale ---
-            lam_Q = 0.1          # how much to pull Q toward the prior; tune if needed
+            lam_Q = 0.3          # how much to pull Q toward the prior; tune if needed
             Q_prior = 0.1 * np.eye(K)  # prior process noise level
             Q_new = (1.0 - lam_Q) * Q_new + lam_Q * Q_prior
 
             # Cap the overall scale of Q to avoid exploding dynamics
-            max_trace = 100.0    # maximum allowed trace of Q; tune if needed
+            max_trace = 30.0    # maximum allowed trace of Q; tune if needed
             tr_Q = float(np.trace(Q_new))
             if tr_Q > max_trace:
                 Q_new *= max_trace / tr_Q
