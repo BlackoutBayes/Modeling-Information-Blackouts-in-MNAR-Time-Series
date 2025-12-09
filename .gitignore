@@ -1,8 +1,14 @@
 loop_20150101_20151231.csv
 env/
+<<<<<<< Updated upstream
 __pycache__/
 *.pyc
 .DS_Store
 .ipynb_checkpoints
 .vscode/
 data/
+=======
+data/
+__pycache__/
+*.pyc
+>>>>>>> Stashed changes
