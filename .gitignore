@@ -7,3 +7,5 @@ __pycache__/
 .vscode/
 data/
 .venv/
+loop_20150101_20151231.csv
+data-old/
